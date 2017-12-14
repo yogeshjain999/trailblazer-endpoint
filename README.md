@@ -4,6 +4,10 @@
 
 Decouple finding out *what happened* from *what to do*.
 
+The idea: Pattern, Action, Matcher
+
+
+
 ## Motivation
 
 Trailblazer brings a lot of clarity to your controller logic,

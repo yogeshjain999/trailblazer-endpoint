@@ -6,4 +6,4 @@ gemspec
 gem "dry-validation"
 gem "minitest-line"
 gem "multi_json"
-gem "trailblazer", path: "../trailblazer"
+# gem "trailblazer", path: "../trailblazer"

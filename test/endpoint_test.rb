@@ -1,196 +1,75 @@
-require "./test_helper"
+require "test_helper"
 
-require "reform"
-require "trailblazer"
-require "reform/form/dry"
 require "trailblazer/endpoint"
-require "trailblazer/endpoint/rails"
 
 class EndpointTest < Minitest::Spec
-  # NOTE: Consider moving all this code to a separate class as
-  # it is relevant for the test but it is boilerplate for testing
-  Song = Struct.new(:id, :title, :length) do
-    def self.find_by(id: nil)
-      id.nil? ? nil : new(id)
-    end
-  end
+  it do
 
-  require "representable/json"
-  class Serializer < Representable::Decorator
-    include Representable::JSON
-    property :id
-    property :title
-    property :length
+    patterns = Class.new do
+      include Trailblazer::Endpoint::Pattern
 
-    class Errors < Representable::Decorator
-      include Representable::JSON
-      property :messages
-    end
-  end
+      # a pattern method always receives everything after the first arg passed to `Match.()`
+      #   Match.( [your config], result, some: config, you: want )
 
-  class Deserializer < Representable::Decorator
-    include Representable::JSON
-    property :title
-  end
+      pattern def success_with_block?(result, **options, &block)
+        result.success? && block_given?
+      end
 
-  class Show < Trailblazer::Operation
-    extend Representer::DSL
-    step Model(Song, :find_by)
-    representer :serializer, Serializer
-  end
+      pattern def new_success?(result, hint:, **, &block)
+        result.success? && hint == :new # this is just my "style"
+      end
 
-  class Create < Trailblazer::Operation
-    step Policy::Guard ->(options) { options["user.current"] == ::Module }
+      pattern def update_failure?(result, hint:, **, &block)
+        result.failure? && hint == :update
+      end
 
-    extend Representer::DSL
-    representer :serializer, Serializer
-    representer :deserializer, Deserializer
-    representer :errors, Serializer::Errors
-
-    extend Contract::DSL
-    contract do
-      property :title
-      property :length
-
-      include Reform::Form::Dry
-      validation :default do
-        required(:title).filled
+      # It is possible to have other methods in your patterns that help keeping it DRY.
+      def some_other_method_that_should_be_ignored # this method is not a pattern.
       end
     end
 
-    step Model(Song, :new)
-    step Contract::Build()
-    step Contract::Validate(representer: self["representer.deserializer.class"])
-    step ->(options) { options["model"].id = 9 }
-  end
+    # we now have the patterns (or rules) comiled, we can use inheritance, etc.
+    patterns.new.to_h.keys.must_equal [:success_with_block?, :new_success?, :update_failure?]
 
-  class Update < Trailblazer::Operation
-    step Model(Song, :find_by)
-  end
+    # here, you can use a module and Rails API, or you can stay strict and only delegate to representers, etc.
+    MyActions = actions = Module.new do
+      include Trailblazer::Endpoint::Action
 
-  describe "default matchers" do
-    it "handles create" do
-      result = Create.(
-        {},
-        "user.current" => ::Module,
-        "document" => '{"id": 9, "title": "Encores", "length": 999 }'
-      )
-      response = Trailblazer::Endpoint.(result)
-      response[:data].to_json.must_equal({ id: 9 }.to_json)
-      response[:status].must_equal :created
-    end
-
-    it "handles success" do
-      result = Show.(id: 1)
-      response = Trailblazer::Endpoint.(result)
-      response[:data].to_json.must_equal({ id: 1 }.to_json)
-      response[:status].must_equal :ok
-    end
-
-    it "handles unauthenticated" do
-      result = Create.(
-        {},
-        "document" => '{"id": 9, "title": "Encores", "length": 999 }'
-      )
-      response = Trailblazer::Endpoint.(result)
-      response[:data].must_equal({})
-      response[:status].must_equal :unauthorized
-    end
-
-    it "handles not found" do
-      result = Update.(
-        { id: nil },
-        "user.current" => ::Module,
-        "document" => '{"id": 9, "title": "Encores", "length": 999 }'
-      )
-      response = Trailblazer::Endpoint.(result)
-      response[:data].to_json.must_equal({}.to_s)
-      response[:status].must_equal :not_found
-    end
-
-    it "handles broken contracts" do
-      result = Create.(
-        {},
-        "user.current" => ::Module,
-        "document" => '{ "title": "" }'
-      )
-      response = Trailblazer::Endpoint.(result)
-      response[:data].must_equal({ messages: { title: ["must be filled"]}})
-      response[:status].must_equal :unprocessable_entity
-    end
-  end
-
-  describe "overriding locally" do
-    # NOTE: Added cases will be evaluated before the defaults
-    # This allows creating special cases that would else be covered
-    # in a generic handler
-    it "allows adding new cases" do
-      result = Create.(
-        {},
-        "user.current" => ::Module,
-        "document" => '{ "title": "" }'
-      )
-      super_special = {
-        rule: ->(result) do
-          result.failure? && result["result.contract.default"]&.failure? && result["result.contract.default"]&.errors&.messages.include?(:title)
-        end,
-        resolve: ->(_result, _representer) do
-          { "data": { messages: ["status 200, ok but!"] }, "status": :ok }
-        end
-      }
-      response = Trailblazer::Endpoint.(result, nil, super_special: super_special)
-      response[:data].must_equal(messages: ["status 200, ok but!"])
-      response[:status].must_equal :ok
-    end
-
-    it "allows re-writing the rule for existing matcher" do
-      result = Create.(
-        {},
-        "user.current" => ::Module,
-        "document" => '{ "title": "" }'
-      )
-      not_found_rule = ->(result) do
-        result.failure? && result["result.contract.default"]&.failure? && result["result.contract.default"]&.errors&.messages.include?(:title)
+      action def yield_block(result, &block)
+        yield(result)
       end
-      response = Trailblazer::Endpoint.(result, nil, not_found: { rule: not_found_rule } )
-      response[:data].must_equal({})
-      response[:status].must_equal :not_found
-    end
 
-    it "allows re-writing the resolve for existing matcher" do
-      result = Create.(
-        {},
-        "user.current" => ::Module,
-        "document" => '{ "title": "" }'
-      )
-      contract_resolve = ->(result, _representer) do
-        {
-          "data": { messages: result["result.contract.default"]&.errors&.messages },
-          "status": :bad_request
-        }
+      action def _render(result, some_default_option: "Bootstrap", hint:)
+        "#{self.class} #{hint} #{result.success?}"
       end
-      response = Trailblazer::Endpoint.(result, nil, contract_failure: { resolve: contract_resolve } )
-      response[:data].must_equal({ messages: { title: ["must be filled"]}})
-      response[:status].must_equal :bad_request
     end
 
-    it "allows re-writing the whole matcher" do
-      result = Create.(
-        {},
-        "user.current" => ::Module,
-        "document" => '{ "title": "" }'
-      )
-      new_contract_failure = {
-        rule: ->(result) do
-          result.failure?
-        end,
-        resolve: ->(_result, _representer) do
-          { "data": { messages: ["status 200, ok but!"] }, "status": :ok }
-        end
-      }
-      response = Trailblazer::Endpoint.(result, nil, contract_failure: new_contract_failure)
-      response[:data].must_equal(messages: ["status 200, ok but!"])
-      response[:status].must_equal :ok
+
+    class MyController
+      include MyActions
     end
+
+require "trailblazer/option"
+
+
+
+    patterns = patterns.new.to_h
+
+    matcher_cfg = {
+      patterns[:success_with_block?]  => Trailblazer::Option(:yield_block),
+      patterns[:update_failure?]      => Trailblazer::Option(:_render),
+    }
+
+    result = Struct.new(:success?).new(true) # run operation.
+
+    Trailblazer::Endpoint::Matcher.( [ matcher_cfg, exec_context: MyController.new ], result ) do |result|
+      "success! #{result.success?.inspect}"
+    end.must_equal "success! true"
+
+    result = Struct.new(:success?, :failure?).new(false, true) # run operation.
+
+    Trailblazer::Endpoint::Matcher.( [ matcher_cfg, exec_context: MyController.new ], result, hint: :update ) do |result|
+      "success! #{result.success?.inspect}"
+    end.must_equal "EndpointTest::MyController update false"
   end
 end
