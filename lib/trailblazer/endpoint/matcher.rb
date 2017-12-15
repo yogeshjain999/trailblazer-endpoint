@@ -1,15 +1,19 @@
 module Trailblazer
   module Endpoint
     class Matcher
-      def self.call( (matcher_cfg, options), *args, &block)
+      def initialize(map)
+        @map = map.freeze
+      end
+
+      def call( call_options, *args, &block)
         # find the action.
-        pattern, action = matcher_cfg.find do |pattern, action|
+        pattern, action = @map.find do |pattern, action|
           pattern.( *args, &block ) # call the pattern and simply pass on the args.
         end
 
         raise "not implemented" unless action
 
-        action.(*args, options, &block)
+        action.(*args, call_options, &block)
       end
 
 

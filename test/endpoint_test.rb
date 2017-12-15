@@ -62,13 +62,15 @@ require "trailblazer/option"
 
     result = Struct.new(:success?).new(true) # run operation.
 
-    Trailblazer::Endpoint::Matcher.( [ matcher_cfg, exec_context: MyController.new ], result ) do |result|
+    matcher = Trailblazer::Endpoint::Matcher.new(matcher_cfg)
+
+    matcher.( {exec_context: MyController.new}, result ) do |result|
       "success! #{result.success?.inspect}"
     end.must_equal "success! true"
 
     result = Struct.new(:success?, :failure?).new(false, true) # run operation.
 
-    Trailblazer::Endpoint::Matcher.( [ matcher_cfg, exec_context: MyController.new ], result, hint: :update ) do |result|
+    matcher.( { exec_context: MyController.new }, result, hint: :update ) do |result|
       "success! #{result.success?.inspect}"
     end.must_equal "EndpointTest::MyController update false"
   end
