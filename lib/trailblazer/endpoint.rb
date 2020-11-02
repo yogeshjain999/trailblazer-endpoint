@@ -27,21 +27,21 @@ module Trailblazer
       # puts
 
       app_protocol = Class.new(protocol) do
-        step(Subprocess(domain_activity), {inherit: true, id: :domain_activity, replace: :domain_activity,
-
-# FIXME: where does this go?
+        step(Subprocess(domain_activity), {
+          replace: :domain_activity,
         }.
-          merge(extensions_options).
-          merge(instance_exec(&protocol_block)) # the block is evaluated in the {Protocol} context.
+          merge(Trailblazer::Endpoint::Protocol::Domain.outputs_for(domain_activity)).
+          merge(extensions_options)
         )
       end
 
       # puts Trailblazer::Developer.render(app_protocol)
 
       Class.new(adapter) do
-        step(Subprocess(app_protocol), {inherit: true, id: :protocol, replace: :protocol})
+        step(Subprocess(app_protocol), {
+          replace: :protocol
+        }.merge(app_protocol.mapped_stop_events_to_output_tracks))
       end # app_adapter
-
     end
 
     def self.options_for_scope_domain_ctx()
@@ -63,30 +63,13 @@ module Trailblazer
 
     # Runtime
     # Invokes the endpoint for you and runs one of the three outcome blocks.
-    def self.with_or_etc(activity, args, failure_block:, success_block:, protocol_failure_block:, invoke: Trailblazer::Activity::TaskWrap.method(:invoke))
+    def self.with_or_etc(activity, args, invoke: Trailblazer::Developer.method(:wtf?))
     # def self.with_or_etc(activity, args, failure_block:, success_block:, protocol_failure_block:, invoke: Trailblazer::Developer.method(:wtf?))
 
       # args[1] = args[1].merge(focus_on: { variables: [:returned], steps: :invoke_workflow })
 
       # signal, (endpoint_ctx, _ ) = Trailblazer::Developer.wtf?(activity, args)
       signal, (endpoint_ctx, _ ) = invoke.call(activity, args) # translates to Trailblazer::Developer.wtf?(activity, args)
-
-      # this ctx is passed to the controller block.
-      block_ctx = endpoint_ctx[:domain_ctx].merge(endpoint_ctx: endpoint_ctx, signal: signal, errors: endpoint_ctx[:errors]) # DISCUSS: errors? status?
-
-      # if signal < Trailblazer::Activity::End::Success
-      adapter_terminus_semantic = signal.to_h[:semantic]
-
-      executed_block =
-        if adapter_terminus_semantic    == :success
-          success_block
-        elsif adapter_terminus_semantic == :fail_fast
-          protocol_failure_block
-        else
-          failure_block
-        end
-
-      executed_block.(block_ctx, **block_ctx)
 
       # we return the original context???
       return signal, [endpoint_ctx]
@@ -116,7 +99,7 @@ module Trailblazer
     end
 
     # FIXME: name will change! this is for controllers, only!
-    def self.advance_from_controller(endpoint, success_block:, failure_block:, protocol_failure_block: protocol_failure_block, **argument_options)
+    def self.advance_from_controller(endpoint, success_block:, failure_block:, protocol_failure_block:, **argument_options)
       args = Trailblazer::Endpoint.arguments_for(argument_options)
 
       signal, (ctx, _ ) = Trailblazer::Endpoint.with_or_etc(
@@ -144,5 +127,6 @@ end
 require "trailblazer/endpoint/protocol"
 require "trailblazer/endpoint/adapter"
 require "trailblazer/endpoint/dsl"
+require "trailblazer/endpoint/track"
 require "trailblazer/endpoint/controller"
 require "trailblazer/endpoint/options"

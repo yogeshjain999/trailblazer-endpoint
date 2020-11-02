@@ -15,82 +15,26 @@ module Trailblazer
     #   not_authenticated: 401
     #   not_authorized: 403
     class Protocol < Trailblazer::Activity::Railway
-      class Noop < Trailblazer::Activity::Railway
-      end
+      NotAuthenticated  = Class.new(Trailblazer::Activity::Signal)
+      NotFound          = Class.new(Trailblazer::Activity::Signal)
+      NotAuthorized     = Class.new(Trailblazer::Activity::Signal)
 
-      def self._Path(semantic:, &block) # DISCUSS: the problem with Path currently is https://github.com/trailblazer/trailblazer-activity-dsl-linear/issues/27
-        Path(track_color: semantic, end_id: "End.#{semantic}", end_task: Activity::End.new(semantic: semantic), &block)
-      end
-
-      step :authenticate, Output(:failure) => _Path(semantic: :not_authenticated) do
-          # step :handle_not_authenticated
-        end
-
-      step :policy, Output(:failure) => _Path(semantic: :not_authorized) do # user from cookie, etc
-        # step :handle_not_authorized
-      end
+      step :authenticate, Output(NotAuthenticated, :not_authenticated) => End(:not_authenticated)
 
       # Here, we test a domain OP with ADDITIONAL explicit ends that get wired to the Adapter (vaidation_error => failure).
       # We still need to test the other way round: wiring a "normal" failure to, say, not_found, by inspecting the ctx.
-      step Subprocess(Noop), id: :domain_activity
+      step nil, id: :domain_activity
 
+      def self.mapped_stop_events_to_output_tracks
+        graph = Trailblazer::Activity::Introspect::Graph(self)
 
-
-      # add the {End.not_found} terminus to this Protocol. I'm not sure that's the final style, but since a {Protocol} needs to provide all
-      # termini for the Adapter this is the only way to get it working right now.
-      # FIXME: is this really the only way to add an {End} to all this?
-      @state.update_sequence do |sequence:, **|
-        sequence = Activity::Path::DSL.append_end(sequence, task: Activity::End.new(semantic: :not_found), magnetic_to: :not_found, id: "End.not_found")
-        sequence = Activity::Path::DSL.append_end(sequence, task: Activity::End.new(semantic: :invalid_data), magnetic_to: :invalid_data, id: "End.invalid_data")
-
-        recompile_activity!(sequence)
-
-        sequence
-      end
-
-      # Best-practices of useful routes and handlers that work with 2.1-OPs.
-      class Standard < Protocol
-        step :handle_not_authenticated, magnetic_to: :not_authenticated, Output(:success) => Track(:not_authenticated), Output(:failure) => Track(:not_authenticated)#, before: "End.not_authenticated"
-        step :handle_not_authorized,    magnetic_to: :not_authorized, Output(:success) => Track(:not_authorized), Output(:failure) => Track(:not_authorized)
-        # step :handle_invalid_data,      magnetic_to: :invalid_data, Output(:success) => Track(:invalid_data), Output(:failure) => Track(:invalid_data)
-
-
-        # TODO: allow translation.
-        module Handler
-          def handle_not_authorized(ctx, errors:, **)
-            errors.message = "Action not allowed due to a policy setting."
-          end
-
-          def handle_not_authenticated(ctx, errors:, **)
-            errors.message = "Authentication credentials were not provided or are invalid."
-          end
+        outputs = graph.stop_events.collect do |stop_event|
+          semantic = stop_event.to_h[:semantic]
+          [Output(semantic), Track(semantic)]
         end
 
-        class Termini # FIXME: this means with invalid_data, not_found termini? 2.1?
-
-        end
+        outputs.to_h
       end
-
-      module Bridge
-        # this "bridge" should be optional for "legacy operations" that don't have explicit ends.
-        # we have to inspect the ctx to find out what "really" happened (e.g. model empty ==> 404)
-          NotFound      = Class.new(Trailblazer::Activity::Signal)
-          NotAuthorized = Class.new(Trailblazer::Activity::Signal)
-          NotAuthenticated = Class.new(Trailblazer::Activity::Signal)
-
-        def self.insert(protocol, **)
-          Class.new(protocol) do
-            fail :success?, after: :domain_activity,
-            # FIXME: how to add more signals/outcomes?
-            Output(NotFound, :not_found)            => Track(:not_found),
-
-            # FIXME: Track(:not_authorized) is defined before this step, so the Forward search doesn't find it.
-            # solution would be to walk down sequence and find the first {:magnetic_to} "not_authorized"
-            Output(NotAuthorized, :not_authorized)  => Track(:not_authorized) # FIXME: how to "insert into path"? => Track(:not_authorized) doesn't play!
-          end
-        end
-      end
-
 
       module Domain
         # taskWrap step that saves the return signal of the {domain_activity}.
@@ -111,6 +55,24 @@ module Trailblazer
         def self.extension_for_terminus_handler
           # this is called after {:output}.
           [[Trailblazer::Activity::TaskWrap::Pipeline.method(:insert_after), "task_wrap.call_task", ["endpoint.end_signal", method(:terminus_handler)]]]
+        end
+
+        def self.outputs_for(domain_activity)
+          graph = Trailblazer::Activity::Introspect::Graph(domain_activity)
+
+          outputs = {
+            Protocol.Output(:failure) => Protocol.End(:invalid_data),
+          }
+
+          if graph.stop_events.find{ |se| se.to_h[:semantic] == :not_authorized }
+            outputs.merge!(Protocol.Output(:not_authorized) => Protocol.End(:not_authorized))
+          end
+
+          if graph.stop_events.find{ |se| se.to_h[:semantic] == :not_found }
+            outputs.merge!(Protocol.Output(:not_found) => Protocol.End(:not_found))
+          end
+
+          outputs
         end
       end
 

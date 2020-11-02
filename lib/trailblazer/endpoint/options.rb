@@ -4,7 +4,7 @@ module Trailblazer
   class Endpoint
     module Options
       module DSL
-        def directive(directive_name, *callables, inherit: superclass)
+        def directive(directive_name, *callables, inherit: nil)
           options = {}
 
           if inherit

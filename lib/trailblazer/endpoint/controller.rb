@@ -92,9 +92,9 @@ module Trailblazer
 
           def endpoint(name, **options, &block)
             options = options.merge(protocol_block: block) if block_given?
+            name.is_a?(Hash) ? generic_endpoint_config(**name, **options) : endpoint_config(name, **options)
 
-            return generic_endpoint_config(**name, **options) if name.is_a?(Hash)
-            endpoint_config(name, **options)
+            Trailblazer::Endpoint::Track.new(options[:adapter])
           end
 
           def generic_endpoint_config(protocol:, adapter:, **options)
@@ -122,7 +122,7 @@ module Trailblazer
 
       module InstanceMethods
 
-        def endpoint_for(name, config_source: self.class)
+        def endpoint_for(name, config_source: self)
           config_source.options_for(:endpoints, {}).fetch(name.to_s) # TODO: test non-existant endpoint
         end
 
@@ -146,12 +146,12 @@ module Trailblazer
 
             action_options = {controller: self}.merge(action_options) # FIXME: redundant with {InstanceMethods#endpoint}
 
-            block_options = config_source.options_for(:options_for_block_options, **action_options)
-            block_options = Trailblazer::Endpoint::Options.merge_with(action_options, block_options)
+            # block_options = config_source.options_for(:options_for_block_options, **action_options)
+            # block_options = Trailblazer::Endpoint::Options.merge_with(action_options, block_options)
 
             signal, (ctx, _) = Trailblazer::Endpoint::Controller.advance_endpoint_for_controller(
               endpoint:       endpoint,
-              block_options:  block_options,
+              block_options:  action_options,
               config_source:  config_source,
               **action_options
             )
@@ -200,7 +200,6 @@ module Trailblazer
           endpoint,
           args, # [ctx, flow_options]
 
-          **block_options,
           # success_block: success_block,
           # failure_block: failure_block,
           # protocol_failure_block: protocol_failure_block,
