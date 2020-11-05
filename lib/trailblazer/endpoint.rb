@@ -116,7 +116,7 @@ module Trailblazer
     end
 
     # FIXME: name will change! this is for controllers, only!
-    def self.advance_from_controller(endpoint, success_block:, failure_block:, protocol_failure_block: protocol_failure_block, **argument_options)
+    def self.advance_from_controller(endpoint, success_block:, failure_block:, protocol_failure_block:, **argument_options)
       args = Trailblazer::Endpoint.arguments_for(argument_options)
 
       signal, (ctx, _ ) = Trailblazer::Endpoint.with_or_etc(
@@ -145,4 +145,5 @@ require "trailblazer/endpoint/protocol"
 require "trailblazer/endpoint/adapter"
 require "trailblazer/endpoint/dsl"
 require "trailblazer/endpoint/controller"
+require "trailblazer/endpoint/grape/controller"
 require "trailblazer/endpoint/options"
